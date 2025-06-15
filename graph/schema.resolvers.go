@@ -8,17 +8,36 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Matthew-K310/linear-cli.git/graph/model"
+	"github.com/Matthew-K310/linear-cli/graph/model"
 )
 
-// CreateTodo is the resolver for the createTodo field.
-func (r *mutationResolver) CreateTodo(ctx context.Context, input model.NewTodo) (*model.Todo, error) {
-	panic(fmt.Errorf("not implemented: CreateTodo - createTodo"))
+// CreateIssue is the resolver for the createIssue field.
+func (r *mutationResolver) CreateIssue(ctx context.Context, input model.NewIssue) (*model.Issue, error) {
+	var issue model.Issue
+	issue.Title = input.Title
+	issue.Description = input.Description
+	return &issue, nil
 }
 
-// Todos is the resolver for the todos field.
-func (r *queryResolver) Todos(ctx context.Context) ([]*model.Todo, error) {
-	panic(fmt.Errorf("not implemented: Todos - todos"))
+// Login is the resolver for the login field.
+func (r *mutationResolver) Login(ctx context.Context, input model.Login) (string, error) {
+	panic(fmt.Errorf("not implemented: Login - login"))
+}
+
+// RefreshToken is the resolver for the refreshToken field.
+func (r *mutationResolver) RefreshToken(ctx context.Context, inputk model.RefreshTokenInput) (string, error) {
+	panic(fmt.Errorf("not implemented: RefreshToken - refreshToken"))
+}
+
+// Issues is the resolver for the issues field.
+func (r *queryResolver) Issues(ctx context.Context) ([]*model.Issue, error) {
+	var issues []*model.Issue
+	dummyIssue := model.Issue{
+		Title:       "This is a test issue",
+		Description: "This is a bucket",
+	}
+	issues = append(issues, &dummyIssue)
+	return issues, nil
 }
 
 // Mutation returns MutationResolver implementation.
@@ -27,5 +46,35 @@ func (r *Resolver) Mutation() MutationResolver { return &mutationResolver{r} }
 // Query returns QueryResolver implementation.
 func (r *Resolver) Query() QueryResolver { return &queryResolver{r} }
 
-type mutationResolver struct{ *Resolver }
-type queryResolver struct{ *Resolver }
+type (
+	mutationResolver struct{ *Resolver }
+	queryResolver    struct{ *Resolver }
+)
+
+// !!! WARNING !!!
+// The code below was going to be deleted when updating resolvers. It has been copied here so you have
+// one last chance to move it out of harms way if you want. There are two reasons this happens:
+//  - When renaming or deleting a resolver the old code will be put in here. You can safely delete
+//    it when you're done.
+//  - You have helper methods in this file. Move them out to keep these resolver files clean.
+/*
+	func (r *mutationResolver) CreateLink(
+	ctx context.Context,
+	input model.NewLink,
+) (*model.Link, error) {
+	panic(fmt.Errorf("not implemented: CreateLink - createLink"))
+}
+func (r *mutationResolver) CreateUser(ctx context.Context, input model.NewUser) (string, error) {
+	panic(fmt.Errorf("not implemented: CreateUser - createUser"))
+}
+func (r *queryResolver) Links(ctx context.Context) ([]*model.Link, error) {
+	var links []*model.Link
+	dummyLink := model.Link{
+		Title:   "dingus link",
+		Address: "https://address.org",
+		User:    &model.User{Name: "admin"},
+	}
+	links = append(links, &dummyLink)
+	return links, nil
+}
+*/
