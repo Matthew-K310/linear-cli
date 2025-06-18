@@ -1,2 +1,4 @@
 .env
 query.sh
+archived/
+.DS_Store

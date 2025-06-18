@@ -28,6 +28,6 @@ func Load() error {
 		return fmt.Errorf("API_KEY not set in .env or in env vars")
 	}
 
-	log.Println("APIKey loaded successfully from environment.")
+	// log.Println("APIKey loaded successfully from environment.")
 	return nil
 }

@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings" // Import strings package for validation
+	"strings"
 
-	"github.com/manifoldco/promptui" // Import the promptui package
+	"github.com/manifoldco/promptui"
 	"github.com/spf13/cobra"
 
 	"github.com/Matthew-K310/linear-cli/api"
@@ -18,7 +18,6 @@ type promptContent struct {
 	label    string
 }
 
-// Structs specific to the issues query response (kept here as listCmd uses them)
 type IssueNode struct {
 	ID          string `json:"id"`
 	Title       string `json:"title"`
@@ -32,11 +31,10 @@ type IssueNode struct {
 		ID   string `json:"id"`
 		Name string `json:"name"`
 	} `json:"assignee"`
-	Team struct { // Include team details if listing issues from multiple teams
+	Team struct {
 		ID   string `json:"id"`
 		Name string `json:"name"`
 	} `json:"team"`
-	CreatedAt string `json:"createdAt"`
 }
 
 type IssuesConnection struct {
@@ -51,10 +49,46 @@ type IssueCreateResponseData struct {
 	IssueCreate struct {
 		Success bool `json:"success"`
 		Issue   struct {
-			ID    string `json:"id"`
-			Title string `json:"title"`
+			ID          string `json:"id"`
+			Title       string `json:"title"`
+			Description string `json:"description"`
+			State       struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"state"`
 		} `json:"issue"`
 	} `json:"issueCreate"`
+}
+
+type TeamNode struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type TeamsConnection struct {
+	Nodes []TeamNode `json:"nodes"`
+}
+
+type TeamsResponseData struct {
+	Teams TeamsConnection `json:"teams"`
+}
+
+type StateNode struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
+type StateConnection struct {
+	Nodes []StateNode `json:"nodes"`
+}
+
+type TeamStatesResponseData struct {
+	Team struct {
+		ID     string          `json:"id"`
+		Name   string          `json:"name"`
+		States StateConnection `json:"states"`
+	} `json:"team"`
 }
 
 var issuesRootCmd = &cobra.Command{
@@ -63,20 +97,71 @@ var issuesRootCmd = &cobra.Command{
 	Long:  `Provides commands to create, list, and modify Linear issues.`,
 }
 
-// listCmd represents the list subcommand for issues
 var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List Linear issues",
 	Long:  `Lists issues. Can be filtered by flags.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		teamID, _ := cmd.Flags().GetString("team")
+		// Get flag values
+		teamNameFromFlag, _ := cmd.Flags().GetString("team")
 		stateType, _ := cmd.Flags().GetString("state-type")
 		limit, _ := cmd.Flags().GetInt("limit")
 
-		// Updated query to use variables for filtering
+		apiKey := config.GetAPIKey()
+		if apiKey == "" {
+			fmt.Fprintln(os.Stderr, "Error: API_KEY is not set.")
+			os.Exit(1)
+		}
+
+		teamID := "" // Variable to hold the fetched Team ID (UUID)
+
+		// If a team name was provided via the flag, look up its ID
+		if teamNameFromFlag != "" {
+			teamQuery := `
+			query GetTeamIdByName($teamName: String!) {
+				teams(filter: {name: {eq: $teamName}}) {
+					nodes {
+						id
+						name
+					}
+				}
+			}
+			`
+			teamVars := map[string]interface{}{
+				"teamName": teamNameFromFlag,
+			}
+
+			fmt.Printf("Looking up Team ID for name '%s'...\n", teamNameFromFlag)
+			teamData, err := api.MakeGraphQLRequest(apiKey, teamQuery, teamVars)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error looking up team '%s': %v\n", teamNameFromFlag, err)
+				os.Exit(1)
+			}
+
+			var teamsResponse TeamsResponseData // Reuse the struct
+			if err := json.Unmarshal(teamData, &teamsResponse); err != nil {
+				fmt.Fprintf(os.Stderr, "Error unmarshalling team data: %v\n", err)
+				os.Exit(1)
+			}
+
+			if len(teamsResponse.Teams.Nodes) == 0 {
+				fmt.Fprintf(os.Stderr, "Error: Team '%s' not found.\n", teamNameFromFlag)
+				os.Exit(1)
+			} else if len(teamsResponse.Teams.Nodes) > 1 {
+				// This case is unlikely for an exact name match, but handle it
+				fmt.Fprintf(os.Stderr, "Error: Multiple teams found with name '%s'. Please use the Team ID.\n", teamNameFromFlag)
+				os.Exit(1)
+			} else {
+				// Found exactly one team, get its ID
+				teamID = teamsResponse.Teams.Nodes[0].ID
+				fmt.Printf("Found Team ID: %s\n", teamID)
+			}
+		}
+
+		// Now make the main issues query, using the fetched teamID if available
 		query := `
-		query Issue($teamId: String, $stateType: String, $first: Int) {
-			issues(filter: {teamId: {eq: $teamId}, state: {type: {eq: $stateType}}}, first: $first) {
+		query Issue($teamId: ID, $stateType: String, $first: Int) {
+			issues(filter: {team: {id: {eq: $teamId}}, state: {type: {eq: $stateType}}}, first: $first) {
 				nodes {
 					id
 					title
@@ -87,21 +172,20 @@ var listCmd = &cobra.Command{
 						type
 					}
 					assignee {
-						id
 						name
+						id 
 					}
 					team {
 						id
 						name
 					}
-					createdAt
 				}
 			}
 		}
 		`
 
-		// Define variables based on flags
 		variables := map[string]interface{}{}
+		// Only add teamId to variables if a name was provided and successfully looked up
 		if teamID != "" {
 			variables["teamId"] = teamID
 		}
@@ -109,43 +193,32 @@ var listCmd = &cobra.Command{
 			variables["stateType"] = stateType
 		}
 		if limit > 0 {
-			variables["first"] = limit // Use 'first' for limiting results in GraphQL
+			variables["first"] = limit
 		} else {
-			// Set a default limit if none is provided, otherwise the API might return too many
-			variables["first"] = 50 // Example default limit
-		}
-
-		apiKey := config.GetAPIKey()
-		if apiKey == "" {
-			fmt.Fprintln(os.Stderr, "Error: API_KEY is not set.")
-			os.Exit(1)
+			variables["first"] = 50
 		}
 
 		fmt.Println("Fetching issues...")
 
-		// Pass the query and variables to the API request
 		data, err := api.MakeGraphQLRequest(apiKey, query, variables)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error making GraphQL request: %v\n", err)
 			os.Exit(1)
 		}
 
-		fmt.Println("GraphQL request successful!")
-
-		// Unmarshal the specific response data structure
 		var issuesResponse IssuesResponseData
 		if err := json.Unmarshal(data, &issuesResponse); err != nil {
 			fmt.Fprintf(os.Stderr, "Error unmarshalling issues data: %v\n", err)
 			os.Exit(1)
 		}
 
-		// Process and print the data
 		fmt.Printf("\nFound %d issues:\n", len(issuesResponse.Issues.Nodes))
 		if len(issuesResponse.Issues.Nodes) > 0 {
 			fmt.Println("--------------------")
 			for _, issue := range issuesResponse.Issues.Nodes {
 				fmt.Printf("  Issue ID: %s\n", issue.ID)
 				fmt.Printf("  Title: %s\n", issue.Title)
+				fmt.Printf("  Description: %s\n", issue.Description)
 				fmt.Printf("  Team: %s (%s)\n", issue.Team.Name, issue.Team.ID)
 				fmt.Printf("  State: %s (Type: %s)\n", issue.State.Name, issue.State.Type)
 				if issue.Assignee != nil {
@@ -153,22 +226,23 @@ var listCmd = &cobra.Command{
 				} else {
 					fmt.Println("  Assignee: Unassigned")
 				}
-				fmt.Printf("  Created At: %s\n", issue.CreatedAt)
 				fmt.Println("--------------------")
 			}
 		}
 	},
 }
 
-// createCmd represents the create subcommand for issues
 var createCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a new Linear issue interactively",
 	Long:  `Interactively prompts for details to create a new Linear issue.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		// 1. Use promptui to get input for each field
+		apiKey := config.GetAPIKey()
+		if apiKey == "" {
+			fmt.Fprintln(os.Stderr, "Error: API_KEY is not set.")
+			os.Exit(1)
+		}
 
-		// Prompt for Title (Required)
 		titlePrompt := promptui.Prompt{
 			Label: "Issue Title",
 			Validate: func(input string) error {
@@ -181,16 +255,14 @@ var createCmd = &cobra.Command{
 		title, err := titlePrompt.Run()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Prompt failed %v\n", err)
-			if err == promptui.ErrInterrupt { // Handle user interruption (Ctrl+C)
+			if err == promptui.ErrInterrupt {
 				os.Exit(0)
 			}
 			os.Exit(1)
 		}
 
-		// Prompt for Description (Optional)
 		descriptionPrompt := promptui.Prompt{
 			Label: "Issue Description (Optional)",
-			// No validation needed as description is optional
 		}
 		description, err := descriptionPrompt.Run()
 		if err != nil {
@@ -200,110 +272,185 @@ var createCmd = &cobra.Command{
 			}
 			os.Exit(1)
 		}
-		// Use empty string if user just pressed enter for description
 		if strings.TrimSpace(description) == "" {
 			description = ""
 		}
 
-		// Prompt for Team ID (Required)
-		teamIDPrompt := promptui.Prompt{
-			Label: "Team ID",
-			Validate: func(input string) error {
-				if strings.TrimSpace(input) == "" {
-					return fmt.Errorf("team ID cannot be empty")
+		teamsQuery := `
+		query Teams {
+			teams {
+				nodes {
+					id
+					name
 				}
-				// You could add more complex validation here, e.g., regex for format
-				return nil
+			}
+		}
+		`
+
+		fmt.Println("Fetching teams...")
+		teamsData, err := api.MakeGraphQLRequest(
+			apiKey,
+			teamsQuery,
+			nil,
+		)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error fetching teams: %v\n", err)
+			os.Exit(1)
+		}
+
+		var teamsResponse TeamsResponseData
+		if err := json.Unmarshal(teamsData, &teamsResponse); err != nil {
+			fmt.Fprintf(os.Stderr, "Error unmarshalling teams data: %v\n", err)
+			os.Exit(1)
+		}
+
+		if len(teamsResponse.Teams.Nodes) == 0 {
+			fmt.Fprintln(os.Stderr, "No teams found. Cannot create issue.")
+			os.Exit(1)
+		}
+
+		teamNames := []string{}
+		teamMap := make(map[string]string)
+		for _, team := range teamsResponse.Teams.Nodes {
+			teamNames = append(teamNames, team.Name)
+			teamMap[team.Name] = team.ID
+		}
+
+		teamSelectPrompt := promptui.Select{
+			Label: "Select Team",
+			Items: teamNames,
+			Searcher: func(input string, index int) bool {
+				item := teamNames[index]
+				return strings.Contains(strings.ToLower(item), strings.ToLower(input))
 			},
 		}
-		teamID, err := teamIDPrompt.Run()
+
+		_, selectedTeamName, err := teamSelectPrompt.Run()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Prompt failed %v\n", err)
+			fmt.Fprintf(os.Stderr, "Team selection failed %v\n", err)
 			if err == promptui.ErrInterrupt {
 				os.Exit(0)
 			}
 			os.Exit(1)
 		}
 
-		// 2. Define the GraphQL Mutation Query
-		// Use variables ($title, $description, $teamId) to pass dynamic data
-		// REMOVED THE COMMENT LINE STARTING WITH //
+		selectedTeamID := teamMap[selectedTeamName]
+		fmt.Printf("Selected Team: %s (ID: %s)\n", selectedTeamName, selectedTeamID)
+
+		statesQuery := `
+		query TeamStates($teamId: String!) {
+			team(id: $teamId) {
+				id
+				name
+				states {
+					nodes {
+						id
+						name
+						type
+					}
+				}
+			}
+		}
+		`
+
+		statesVariables := map[string]interface{}{
+			"teamId": selectedTeamID,
+		}
+
+		fmt.Println("Fetching possible statuses for the selected team...")
+		statesData, err := api.MakeGraphQLRequest(
+			apiKey,
+			statesQuery,
+			statesVariables,
+		)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error fetching states for team %s: %v\n", selectedTeamID, err)
+			os.Exit(1)
+		}
+
+		var teamStatesResponse TeamStatesResponseData
+		if err := json.Unmarshal(statesData, &teamStatesResponse); err != nil {
+			fmt.Fprintf(os.Stderr, "Error unmarshalling states data: %v\n", err)
+			os.Exit(1)
+		}
+
+		if len(teamStatesResponse.Team.States.Nodes) == 0 {
+			fmt.Fprintln(os.Stderr, "No statuses found for the selected team. Cannot set status.")
+			os.Exit(1)
+		}
+
+		stateNames := []string{}
+		stateMap := make(map[string]string)
+		for _, state := range teamStatesResponse.Team.States.Nodes {
+			stateNames = append(stateNames, state.Name)
+			stateMap[state.Name] = state.ID
+		}
+
+		stateSelectPrompt := promptui.Select{
+			Label: "Select Status",
+			Items: stateNames,
+			Searcher: func(input string, index int) bool {
+				item := stateNames[index]
+				return strings.Contains(strings.ToLower(item), strings.ToLower(input))
+			},
+		}
+
+		_, selectedStateNameFromPrompt, err := stateSelectPrompt.Run()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Status selection failed %v\n", err)
+			if err == promptui.ErrInterrupt {
+				os.Exit(0)
+			}
+			os.Exit(1)
+		}
+
+		selectedStateID := stateMap[selectedStateNameFromPrompt]
+		fmt.Printf("Selected Status: %s (ID: %s)\n", selectedStateNameFromPrompt, selectedStateID)
+
 		mutation := `
-		mutation CreateIssue($title: String!, $description: String, $teamId: String!) {
+		mutation CreateIssue($title: String!, $description: String, $teamId: String!, $stateId: String) {
 			issueCreate(
 				input: {
 					title: $title
 					description: $description
 					teamId: $teamId
+					stateId: $stateId
 				}
 			) {
 				success
 				issue {
 					id
 					title
-					# You could request more fields of the created issue here if needed
+					description
+					state {
+						id
+						name
+					}
 				}
-				# errors { message } // Consider adding error handling details
-			}
-		}
-		`
-		// NOTE: I changed the comment to # just to show how GraphQL comments look,
-		// but removing the line entirely is also perfectly fine and perhaps cleaner.
-		// If your api.MakeGraphQLRequest client is sensitive to *any* non-query text,
-		// removing the line is the safest bet. Let's remove it to be safe:
-
-		mutation = `
-		mutation CreateIssue($title: String!, $description: String, $teamId: String!) {
-			issueCreate(
-				input: {
-					title: $title
-					description: $description
-					teamId: $teamId
-				}
-			) {
-				success
-				issue {
-					id
-					title
-				}
-				# errors { message }
 			}
 		}
 		`
 
-		// 3. Define Variables Map from prompt values
 		variables := map[string]interface{}{
-			"title":  title,
-			"teamId": teamID,
+			"title":   title,
+			"teamId":  selectedTeamID,
+			"stateId": selectedStateID,
 		}
-		// Add description only if it's not empty after the prompt
 		if description != "" {
 			variables["description"] = description
 		}
 
-		apiKey := config.GetAPIKey()
-		if apiKey == "" {
-			fmt.Fprintln(os.Stderr, "Error: API_KEY is not set.")
-			os.Exit(1)
-		}
-
 		fmt.Println("Creating issue...")
 
-		// 4. Call API to execute the mutation
-		data, err := api.MakeGraphQLRequest(apiKey, mutation, variables)
+		createIssueData, err := api.MakeGraphQLRequest(apiKey, mutation, variables)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error making GraphQL request: %v\n", err)
-			// Depending on your API client, you might need to unmarshal 'data'
-			// even on error to get specific GraphQL errors.
+			fmt.Fprintf(os.Stderr, "Error making GraphQL request to create issue: %v\n", err)
 			os.Exit(1)
 		}
 
-		fmt.Println("GraphQL mutation executed.")
-
-		// 5. Unmarshal and Process the Response
 		var createResponse IssueCreateResponseData
-		if err := json.Unmarshal(data, &createResponse); err != nil {
-			fmt.Fprintf(os.Stderr, "Error unmarshalling create issue data: %v\n", err)
+		if err := json.Unmarshal(createIssueData, &createResponse); err != nil {
+			fmt.Fprintf(os.Stderr, "Error unmarshalling create issue response data: %v\n", err)
 			os.Exit(1)
 		}
 
@@ -311,56 +458,44 @@ var createCmd = &cobra.Command{
 			fmt.Println("Issue created successfully!")
 			fmt.Printf("  ID: %s\n", createResponse.IssueCreate.Issue.ID)
 			fmt.Printf("  Title: %s\n", createResponse.IssueCreate.Issue.Title)
+			if createResponse.IssueCreate.Issue.Description != "" {
+				fmt.Printf("  Description: %s\n", createResponse.IssueCreate.Issue.Description)
+			}
+			if createResponse.IssueCreate.Issue.State.Name != "" {
+				fmt.Printf("  Status: %s\n", createResponse.IssueCreate.Issue.State.Name)
+			}
 		} else {
 			fmt.Fprintln(os.Stderr, "Error creating issue:")
-			// TODO: Add logic to print specific errors from the API response
-			// if the API returns an 'errors' field in the response payload
-			fmt.Fprintf(os.Stderr, "  API reported success: false\n") // Fallback if no error details are unmarshaled
+			fmt.Fprintf(os.Stderr, "  API reported success: false\n")
 			os.Exit(1)
 		}
 	},
 }
 
-// modifyCmd represents the modify subcommand for issues
 var modifyCmd = &cobra.Command{
 	Use:   "modify [issue-id]",
 	Short: "Modify an existing Linear issue",
 	Long:  `Modifies an existing Linear issue identified by its ID.`,
-	Args:  cobra.ExactArgs(1), // Requires exactly one argument: the issue ID
+	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		issueID := args[0]
-		// TODO: Implement logic for modifying an issue
-		// This will involve defining flags for fields to modify (title, state, assignee, etc.)
-		// and making a GraphQL mutation request using the issueID.
 		fmt.Printf("modify issue called for ID: %s\n", issueID)
 		fmt.Println("TODO: Implement issue modification logic")
 	},
 }
 
 func init() {
-	// Add the issuesRootCmd to the main application root command
-	// Assuming 'rootCmd' is defined elsewhere as your application's entry point
-	rootCmd.AddCommand(issuesRootCmd)
+	rootCmd.AddCommand(
+		issuesRootCmd,
+	) // Assuming rootCmd is defined elsewhere and handles the main entry point
 
-	// Add the subcommands to the issuesRootCmd
 	issuesRootCmd.AddCommand(listCmd)
-	issuesRootCmd.AddCommand(createCmd) // createCmd now uses promptui
+	issuesRootCmd.AddCommand(createCmd)
 	issuesRootCmd.AddCommand(modifyCmd)
 
-	// Define flags specifically for the 'list' command
-	listCmd.Flags().StringP("team", "t", "", "Filter issues by Team ID")
+	// Updated flag description to indicate it takes a name
+	listCmd.Flags().StringP("team", "t", "", "Filter issues by Team Name")
 	listCmd.Flags().
 		StringP("state-type", "s", "", "Filter issues by State Type (e.g., 'started', 'completed')")
 	listCmd.Flags().IntP("limit", "l", 0, "Limit the number of results")
-
-	// Remove flags for 'createCmd' as it now uses promptui for input
-	// createCmd.Flags().StringP("title", "T", "", "Title of the new issue")
-	// createCmd.Flags().StringP("description", "d", "", "Description of the new issue (optional)")
-	// createCmd.Flags().StringP("team-id", "", "", "Team ID for the new issue")
-	// createCmd.MarkFlagRequired("title") // Also remove required marks
-	// createCmd.MarkFlagRequired("team-id")
-
-	// TODO: Add flags for 'modifyCmd' (e.g., --title, --state-id, --assignee-id, etc.)
-	// modifyCmd.Flags().StringP("title", "T", "", "New title for the issue")
-	// modifyCmd.Flags().StringP("state-id", "S", "", "New state ID for the issue")
 }
