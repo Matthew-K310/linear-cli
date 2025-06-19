@@ -18,6 +18,7 @@ type promptContent struct {
 	label    string
 }
 
+// Define the structure of an issues
 type IssueNode struct {
 	ID          string `json:"id"`
 	Title       string `json:"title"`
@@ -45,6 +46,7 @@ type IssuesResponseData struct {
 	Issues IssuesConnection `json:"issues"`
 }
 
+// Define the structure of the issues response
 type IssueCreateResponseData struct {
 	IssueCreate struct {
 		Success bool `json:"success"`
@@ -52,7 +54,11 @@ type IssueCreateResponseData struct {
 			ID          string `json:"id"`
 			Title       string `json:"title"`
 			Description string `json:"description"`
-			State       struct {
+			Assignee    struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"assignee"`
+			State struct {
 				ID   string `json:"id"`
 				Name string `json:"name"`
 			} `json:"state"`
@@ -60,6 +66,7 @@ type IssueCreateResponseData struct {
 	} `json:"issueCreate"`
 }
 
+// Define the elements
 type TeamNode struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
@@ -71,6 +78,26 @@ type TeamsConnection struct {
 
 type TeamsResponseData struct {
 	Teams TeamsConnection `json:"teams"`
+}
+
+// Represents a single user/member node
+type UserNode struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// Represents the connection of user/member nodes
+type UserConnection struct {
+	Nodes []UserNode `json:"nodes"`
+}
+
+// Corrected TeamMembersResponseData struct using 'members' field
+type TeamMembersResponseData struct {
+	Team struct {
+		ID      string         `json:"id"`
+		Name    string         `json:"name"`
+		Members UserConnection `json:"members"` // <-- Use 'members' to get assignable users
+	} `json:"team"`
 }
 
 type StateNode struct {
@@ -91,18 +118,19 @@ type TeamStatesResponseData struct {
 	} `json:"team"`
 }
 
+// root "issues" command
 var issuesRootCmd = &cobra.Command{
 	Use:   "issues",
 	Short: "Manage Linear issues",
 	Long:  `Provides commands to create, list, and modify Linear issues.`,
 }
 
+// "issues list" command for listing issues
 var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List Linear issues",
 	Long:  `Lists issues. Can be filtered by flags.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		// Get flag values
 		teamNameFromFlag, _ := cmd.Flags().GetString("team")
 		stateType, _ := cmd.Flags().GetString("state-type")
 		limit, _ := cmd.Flags().GetInt("limit")
@@ -113,9 +141,8 @@ var listCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		teamID := "" // Variable to hold the fetched Team ID (UUID)
+		teamID := ""
 
-		// If a team name was provided via the flag, look up its ID
 		if teamNameFromFlag != "" {
 			teamQuery := `
 			query GetTeamIdByName($teamName: String!) {
@@ -138,7 +165,7 @@ var listCmd = &cobra.Command{
 				os.Exit(1)
 			}
 
-			var teamsResponse TeamsResponseData // Reuse the struct
+			var teamsResponse TeamsResponseData
 			if err := json.Unmarshal(teamData, &teamsResponse); err != nil {
 				fmt.Fprintf(os.Stderr, "Error unmarshalling team data: %v\n", err)
 				os.Exit(1)
@@ -148,17 +175,14 @@ var listCmd = &cobra.Command{
 				fmt.Fprintf(os.Stderr, "Error: Team '%s' not found.\n", teamNameFromFlag)
 				os.Exit(1)
 			} else if len(teamsResponse.Teams.Nodes) > 1 {
-				// This case is unlikely for an exact name match, but handle it
 				fmt.Fprintf(os.Stderr, "Error: Multiple teams found with name '%s'. Please use the Team ID.\n", teamNameFromFlag)
 				os.Exit(1)
 			} else {
-				// Found exactly one team, get its ID
 				teamID = teamsResponse.Teams.Nodes[0].ID
 				fmt.Printf("Found Team ID: %s\n", teamID)
 			}
 		}
 
-		// Now make the main issues query, using the fetched teamID if available
 		query := `
 		query Issue($teamId: ID, $stateType: String, $first: Int) {
 			issues(filter: {team: {id: {eq: $teamId}}, state: {type: {eq: $stateType}}}, first: $first) {
@@ -173,7 +197,7 @@ var listCmd = &cobra.Command{
 					}
 					assignee {
 						name
-						id 
+						id
 					}
 					team {
 						id
@@ -185,7 +209,6 @@ var listCmd = &cobra.Command{
 		`
 
 		variables := map[string]interface{}{}
-		// Only add teamId to variables if a name was provided and successfully looked up
 		if teamID != "" {
 			variables["teamId"] = teamID
 		}
@@ -232,6 +255,7 @@ var listCmd = &cobra.Command{
 	},
 }
 
+// "issues create" command
 var createCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a new Linear issue interactively",
@@ -243,6 +267,7 @@ var createCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
+		// Prompt for issue title
 		titlePrompt := promptui.Prompt{
 			Label: "Issue Title",
 			Validate: func(input string) error {
@@ -261,6 +286,7 @@ var createCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
+		// Prompt for issue description (optional)
 		descriptionPrompt := promptui.Prompt{
 			Label: "Issue Description (Optional)",
 		}
@@ -276,23 +302,20 @@ var createCmd = &cobra.Command{
 			description = ""
 		}
 
+		// Query teams to select from
 		teamsQuery := `
-		query Teams {
-			teams {
-				nodes {
-					id
-					name
-				}
-			}
-		}
-		`
+    query Teams {
+      teams {
+        nodes {
+          id
+          name
+        }
+      }
+    }
+    `
 
 		fmt.Println("Fetching teams...")
-		teamsData, err := api.MakeGraphQLRequest(
-			apiKey,
-			teamsQuery,
-			nil,
-		)
+		teamsData, err := api.MakeGraphQLRequest(apiKey, teamsQuery, nil)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error fetching teams: %v\n", err)
 			os.Exit(1)
@@ -316,6 +339,7 @@ var createCmd = &cobra.Command{
 			teamMap[team.Name] = team.ID
 		}
 
+		// Prompt to select team
 		teamSelectPrompt := promptui.Select{
 			Label: "Select Team",
 			Items: teamNames,
@@ -337,32 +361,103 @@ var createCmd = &cobra.Command{
 		selectedTeamID := teamMap[selectedTeamName]
 		fmt.Printf("Selected Team: %s (ID: %s)\n", selectedTeamName, selectedTeamID)
 
-		statesQuery := `
-		query TeamStates($teamId: String!) {
-			team(id: $teamId) {
-				id
-				name
-				states {
-					nodes {
-						id
-						name
-						type
-					}
-				}
-			}
+		// Query members (assignees) for the selected team
+		assigneesQuery := `
+query TeamMembers($teamId: String!) {
+  team(id: $teamId) {
+    members {
+      nodes {
+        id
+        name
+      }
+    }
+  }
+}
+`
+
+		assigneesVariables := map[string]interface{}{
+			"teamId": selectedTeamID,
 		}
-		`
+
+		assigneesData, err := api.MakeGraphQLRequest(apiKey, assigneesQuery, assigneesVariables)
+		if err != nil {
+			fmt.Fprintf(
+				os.Stderr,
+				"Error fetching assignees for team %s: %v\n",
+				selectedTeamID,
+				err,
+			)
+			os.Exit(1)
+		}
+
+		var teamMembersResponse TeamMembersResponseData
+		if err := json.Unmarshal(assigneesData, &teamMembersResponse); err != nil {
+			fmt.Fprintf(os.Stderr, "Error unmarshalling assignees data: %v\n", err)
+			os.Exit(1)
+		}
+
+		assigneeNames := []string{"Unassigned"}
+		assigneeMap := make(map[string]string)
+		assigneeMap["Unassigned"] = ""
+
+		if len(teamMembersResponse.Team.Members.Nodes) > 0 {
+			for _, member := range teamMembersResponse.Team.Members.Nodes {
+				assigneeNames = append(assigneeNames, member.Name)
+				assigneeMap[member.Name] = member.ID
+			}
+		} else {
+			fmt.Fprintln(os.Stderr, "No members found for the selected team, only 'Unassigned' option available.")
+		}
+
+		// Prompt to select assignee
+		assigneeSelectPrompt := promptui.Select{
+			Label: "Select Assignee",
+			Items: assigneeNames,
+			Searcher: func(input string, index int) bool {
+				item := assigneeNames[index]
+				return strings.Contains(strings.ToLower(item), strings.ToLower(input))
+			},
+		}
+
+		_, selectedAssigneeNameFromPrompt, err := assigneeSelectPrompt.Run()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Assignee selection failed %v\n", err)
+			if err == promptui.ErrInterrupt {
+				os.Exit(0)
+			}
+			os.Exit(1)
+		}
+
+		selectedAssigneeID := assigneeMap[selectedAssigneeNameFromPrompt]
+		fmt.Printf(
+			"Selected Assignee: %s (ID: %s)\n",
+			selectedAssigneeNameFromPrompt,
+			selectedAssigneeID,
+		)
+
+		// Query states (statuses) for the selected team
+		statesQuery := `
+    query TeamStates($teamId: String!) {
+      team(id: $teamId) {
+        id
+        name
+        states {
+          nodes {
+            id
+            name
+            type
+          }
+        }
+      }
+    }
+    `
 
 		statesVariables := map[string]interface{}{
 			"teamId": selectedTeamID,
 		}
 
 		fmt.Println("Fetching possible statuses for the selected team...")
-		statesData, err := api.MakeGraphQLRequest(
-			apiKey,
-			statesQuery,
-			statesVariables,
-		)
+		statesData, err := api.MakeGraphQLRequest(apiKey, statesQuery, statesVariables)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error fetching states for team %s: %v\n", selectedTeamID, err)
 			os.Exit(1)
@@ -386,6 +481,7 @@ var createCmd = &cobra.Command{
 			stateMap[state.Name] = state.ID
 		}
 
+		// Prompt to select issue status
 		stateSelectPrompt := promptui.Select{
 			Label: "Select Status",
 			Items: stateNames,
@@ -407,41 +503,61 @@ var createCmd = &cobra.Command{
 		selectedStateID := stateMap[selectedStateNameFromPrompt]
 		fmt.Printf("Selected Status: %s (ID: %s)\n", selectedStateNameFromPrompt, selectedStateID)
 
-		mutation := `
-		mutation CreateIssue($title: String!, $description: String, $teamId: String!, $stateId: String) {
-			issueCreate(
-				input: {
-					title: $title
-					description: $description
-					teamId: $teamId
-					stateId: $stateId
-				}
-			) {
-				success
-				issue {
-					id
-					title
-					description
-					state {
-						id
-						name
-					}
-				}
-			}
+		// Prepare assigneeId for mutation, nil if unassigned
+		var assigneeID interface{}
+		if selectedAssigneeID == "" {
+			assigneeID = nil
+		} else {
+			assigneeID = selectedAssigneeID
 		}
-		`
+
+		// Issue creation mutation
+		mutation := `
+mutation CreateIssue(
+  $title: String!, 
+  $description: String, 
+  $teamId: String!, 
+  $assigneeId: String, 
+  $stateId: String
+) {
+  issueCreate(
+    input: {
+      title: $title,
+      description: $description,
+      teamId: $teamId,
+      assigneeId: $assigneeId,
+      stateId: $stateId
+    }
+  ) {
+    success
+    issue {
+      id
+      title
+      description
+      assignee {
+        id
+        name
+      }
+      state {
+        id
+        name
+      }
+    }
+  }
+}
+    `
 
 		variables := map[string]interface{}{
-			"title":   title,
-			"teamId":  selectedTeamID,
-			"stateId": selectedStateID,
+			"title":      title,
+			"teamId":     selectedTeamID,
+			"assigneeId": assigneeID,
+			"stateId":    selectedStateID,
 		}
 		if description != "" {
 			variables["description"] = description
 		}
 
 		fmt.Println("Creating issue...")
-
 		createIssueData, err := api.MakeGraphQLRequest(apiKey, mutation, variables)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error making GraphQL request to create issue: %v\n", err)
@@ -461,17 +577,20 @@ var createCmd = &cobra.Command{
 			if createResponse.IssueCreate.Issue.Description != "" {
 				fmt.Printf("  Description: %s\n", createResponse.IssueCreate.Issue.Description)
 			}
+			if createResponse.IssueCreate.Issue.Assignee.ID != "" {
+				fmt.Printf("  Assignee: %s\n", createResponse.IssueCreate.Issue.Assignee.Name)
+			}
 			if createResponse.IssueCreate.Issue.State.Name != "" {
 				fmt.Printf("  Status: %s\n", createResponse.IssueCreate.Issue.State.Name)
 			}
 		} else {
-			fmt.Fprintln(os.Stderr, "Error creating issue:")
-			fmt.Fprintf(os.Stderr, "  API reported success: false\n")
+			fmt.Fprintln(os.Stderr, "Error creating issue: API reported success: false")
 			os.Exit(1)
 		}
 	},
 }
 
+// "issues modify (or edit)" command
 var modifyCmd = &cobra.Command{
 	Use:   "modify [issue-id]",
 	Short: "Modify an existing Linear issue",
@@ -487,13 +606,13 @@ var modifyCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(
 		issuesRootCmd,
-	) // Assuming rootCmd is defined elsewhere and handles the main entry point
+	)
 
 	issuesRootCmd.AddCommand(listCmd)
 	issuesRootCmd.AddCommand(createCmd)
 	issuesRootCmd.AddCommand(modifyCmd)
 
-	// Updated flag description to indicate it takes a name
+	// command flags for filtering and limiting
 	listCmd.Flags().StringP("team", "t", "", "Filter issues by Team Name")
 	listCmd.Flags().
 		StringP("state-type", "s", "", "Filter issues by State Type (e.g., 'started', 'completed')")
