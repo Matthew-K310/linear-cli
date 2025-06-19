@@ -1,4 +1,5 @@
 .env
 query.sh
-archived/
+archives/
 .DS_Store
+linear-cli
