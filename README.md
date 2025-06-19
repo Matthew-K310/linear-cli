@@ -59,6 +59,6 @@ You can also list issues with
 
 You can pass in flags to filter the search list
 
-- `-t` "<team-name>" will let you filter by team name
-- `-s` "<status>" will let you filter by issue status
-- `-l` "<limit>" will let you limit the amount of issue responses printed
+- `-t "<team-name>"` will let you filter by team name
+- `-s "<status>"` will let you filter by issue status
+- `-l "<limit>"` will let you limit the amount of issue responses printed
