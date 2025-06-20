@@ -28,14 +28,18 @@ type IssueNode struct {
 		Name string `json:"name"`
 		Type string `json:"type"`
 	} `json:"state"`
-	Assignee *struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
-	} `json:"assignee"`
 	Team struct {
 		ID   string `json:"id"`
 		Name string `json:"name"`
 	} `json:"team"`
+	Project *struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	} `json:"project"`
+	Assignee *struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	} `json:"assignee"`
 }
 
 type IssuesConnection struct {
@@ -54,7 +58,12 @@ type IssueCreateResponseData struct {
 			ID          string `json:"id"`
 			Title       string `json:"title"`
 			Description string `json:"description"`
-			Assignee    struct {
+			Team        string `json:"name"`
+			Project     struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"project"`
+			Assignee struct {
 				ID   string `json:"id"`
 				Name string `json:"name"`
 			} `json:"assignee"`
@@ -78,6 +87,23 @@ type TeamsConnection struct {
 
 type TeamsResponseData struct {
 	Teams TeamsConnection `json:"teams"`
+}
+
+type ProjectNode struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type ProjectConnection struct {
+	Nodes []ProjectNode `json:"nodes"`
+}
+
+type TeamProjectsResponseData struct {
+	Team struct {
+		ID       string            `json:"id"`
+		Name     string            `json:"name"`
+		Projects ProjectConnection `json:"projects"`
+	}
 }
 
 // Represents a single user/member node
@@ -361,6 +387,77 @@ var createCmd = &cobra.Command{
 		selectedTeamID := teamMap[selectedTeamName]
 		fmt.Printf("Selected Team: %s (ID: %s)\n", selectedTeamName, selectedTeamID)
 
+		// projects selector
+		projectsQuery := `
+		query TeamProjects($teamId: String!) {
+			team(id: $teamId) {
+				id
+				name
+				projects {
+					nodes {
+						id
+						name
+					}
+				}
+			}
+		}
+		`
+
+		projectsVariables := map[string]interface{}{
+			"teamId": selectedTeamID,
+		}
+
+		fmt.Println("Fetching possible projects for the selected team...")
+		projectsData, err := api.MakeGraphQLRequest(apiKey, projectsQuery, projectsVariables)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error fetching projects for team %s: %v\n", selectedTeamID, err)
+			os.Exit(1)
+		}
+
+		var teamProjectsResponse TeamProjectsResponseData
+		if err := json.Unmarshal(projectsData, &teamProjectsResponse); err != nil {
+			fmt.Fprintf(os.Stderr, "Error unmarshalling projects data: %v\n", err)
+			os.Exit(1)
+		}
+
+		if len(teamProjectsResponse.Team.Projects.Nodes) == 0 {
+			fmt.Fprintln(os.Stderr, "No projects found for the selected team. Cannot set project.")
+			os.Exit(1)
+		}
+
+		projectNames := []string{}
+		projectMap := make(map[string]string)
+		for _, project := range teamProjectsResponse.Team.Projects.Nodes {
+			projectNames = append(projectNames, project.Name)
+			projectMap[project.Name] = project.ID
+		}
+
+		// prompt to select project
+		projectSelectPrompt := promptui.Select{
+			Label: "Select Project",
+			Items: projectNames,
+			Searcher: func(input string, index int) bool {
+				item := projectNames[index]
+				return strings.Contains(strings.ToLower(item), strings.ToLower(input))
+			},
+		}
+
+		_, selectedProjectNameFromPrompt, err := projectSelectPrompt.Run()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Project selection failed %v\n", err)
+			if err == promptui.ErrInterrupt {
+				os.Exit(0)
+			}
+			os.Exit(1)
+		}
+
+		selectedProjectID := projectMap[selectedProjectNameFromPrompt]
+		fmt.Printf(
+			"Selected Project: %s (ID: %s)\n",
+			selectedProjectNameFromPrompt,
+			selectedProjectID,
+		)
+
 		// Query members (assignees) for the selected team
 		assigneesQuery := `
 query TeamMembers($teamId: String!) {
@@ -517,6 +614,7 @@ mutation CreateIssue(
   $title: String!, 
   $description: String, 
   $teamId: String!, 
+  $projectId: String, 
   $assigneeId: String, 
   $stateId: String
 ) {
@@ -525,21 +623,25 @@ mutation CreateIssue(
       title: $title,
       description: $description,
       teamId: $teamId,
+      projectId: $projectId,
       assigneeId: $assigneeId,
       stateId: $stateId
     }
   ) {
     success
     issue {
-      id
       title
       description
+      team {
+	      name
+      }
+      project {
+	      name
+      }
       assignee {
-        id
         name
       }
       state {
-        id
         name
       }
     }
@@ -548,10 +650,11 @@ mutation CreateIssue(
     `
 
 		variables := map[string]interface{}{
-			"title":      title,
-			"teamId":     selectedTeamID,
-			"assigneeId": assigneeID,
-			"stateId":    selectedStateID,
+			"title":    title,
+			"teamId":   selectedTeamID,
+			"project":  selectedProjectID,
+			"assignee": assigneeID,
+			"stateId":  selectedStateID,
 		}
 		if description != "" {
 			variables["description"] = description
@@ -577,7 +680,13 @@ mutation CreateIssue(
 			if createResponse.IssueCreate.Issue.Description != "" {
 				fmt.Printf("  Description: %s\n", createResponse.IssueCreate.Issue.Description)
 			}
-			if createResponse.IssueCreate.Issue.Assignee.ID != "" {
+			if createResponse.IssueCreate.Issue.Team != "" {
+				fmt.Printf("  Team: %s\n", createResponse.IssueCreate.Issue.Team)
+			}
+			if createResponse.IssueCreate.Issue.Project.Name != "" {
+				fmt.Printf("  Project: %s\n", createResponse.IssueCreate.Issue.Project.Name)
+			}
+			if createResponse.IssueCreate.Issue.Assignee.Name != "" {
 				fmt.Printf("  Assignee: %s\n", createResponse.IssueCreate.Issue.Assignee.Name)
 			}
 			if createResponse.IssueCreate.Issue.State.Name != "" {
