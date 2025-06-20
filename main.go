@@ -5,7 +5,7 @@ import (
 	"os"
 
 	"github.com/Matthew-K310/linear-cli/cmd"
-	"github.com/Matthew-K310/linear-cli/config"
+	"github.com/Matthew-K310/linear-cli/internal/config"
 )
 
 func main() {
