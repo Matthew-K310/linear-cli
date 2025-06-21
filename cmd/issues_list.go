@@ -93,7 +93,7 @@ var listCmd = &cobra.Command{
 			// This query is similar to the one used in the createCmd for fetching projects for a team,
 			// but with an added filter by project name.
 			projectLookupQuery := `
-			query TeamProjectsFiltered($teamId: ID!, $projectName: String!) {
+			query TeamProjectsFiltered($teamId: String!, $projectName: String!) {
 				team(id: $teamId) {
 					projects(filter: {name: {eq: $projectName}}) {
 						nodes {
@@ -105,7 +105,7 @@ var listCmd = &cobra.Command{
 			}
 			`
 
-			projectVars := map[string]interface{}{
+			projectVars := map[string]any{
 				"teamId":      teamID, // Use the ID of the already found/specified team
 				"projectName": projectNameFromFlag,
 			}
