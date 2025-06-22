@@ -3,6 +3,7 @@ package linear
 // Define the structure of an issue node
 type IssueNode struct {
 	ID          string `json:"id"`
+	Identifier  string `json:"identifier"`
 	Title       string `json:"title"`
 	Description string `json:"description"`
 	State       struct {

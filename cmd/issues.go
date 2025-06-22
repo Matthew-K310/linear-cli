@@ -17,7 +17,7 @@ func init() {
 
 	issuesRootCmd.AddCommand(listCmd)
 	issuesRootCmd.AddCommand(createCmd)
-	// issuesRootCmd.AddCommand(modifyCmd)
+	issuesRootCmd.AddCommand(modifyCmd)
 
 	// command flags for filtering and limiting
 	// listCmd.Flags().StringP("team", "t", "", "Filter issues by Team Name")
