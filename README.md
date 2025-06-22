@@ -13,6 +13,8 @@ honest, most of us live in the terminal anyway 😅).
 
 ###
 
+<!-- TODO: Add images and screen recordings for documentation purposes-->
+
 ## Getting Started
 
 Clone the repo
@@ -43,7 +45,7 @@ The root command is
 
     linear-cli
 
-### Creation
+### Create an Issue
 
 You can create an issue with
 
@@ -51,7 +53,13 @@ You can create an issue with
 
 This will run a process where you input the issue title and description, and then choose a team, assignee, and status (i.e. todo, in progress, backlog)
 
-### Listing
+### Modify/Update an Issue
+
+You can modify issues with
+
+    linear-cli issues modify
+
+### List Issues
 
 You can also list issues with
 

@@ -14,8 +14,6 @@ import (
 	"github.com/Matthew-K310/linear-cli/internal/linear"
 )
 
-// Helper prompt functions
-
 func promptForString(label, defaultValue string) (string, error) {
 	prompt := promptui.Prompt{
 		Label:   fmt.Sprintf("%s (leave empty to keep current)", label),
