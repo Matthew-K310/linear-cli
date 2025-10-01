@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/charmbracelet/huh"
+	"github.com/joho/godotenv"
 )
 
 // TODO Implement API call
@@ -16,9 +17,10 @@ func main() {
 	var apiKey string
 
 	// take user input
-	// TODO Hide input field
 	huh.NewInput().
-		Title("Enter your Linear API key.").
+		Title("Enter your Credentials").
+		Prompt("API Key:").
+		Password(true).
 		Value(&apiKey).
 		Run()
 
@@ -35,4 +37,13 @@ func main() {
 	}
 
 	fmt.Println("Saved to .env")
+
+	// Load from .env
+	if err := godotenv.Load(); err != nil {
+		log.Fatal("Error loading .env file")
+	}
+
+	// Retrieve variable
+	loadedKey := os.Getenv("API_KEY")
+	// fmt.Println("Loaded API key from .env:", loadedKey) // for debugging .env reading
 }

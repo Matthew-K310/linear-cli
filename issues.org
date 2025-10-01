@@ -1,0 +1,23 @@
+#+title: Issues
+
+* Backlog
+
+* Todo
+** TODO Send auth request to Linear API
+
+* In Progress
+
+* Done
+** DONE Read API key from .env file <2025-10-01>
+:LOGBOOK:
+CLOCK: [2025-10-01 Wed 12:31]--[2025-10-01 Wed 12:38] =>  0:07
+:END:
+** DONE Hide API key input field <2025-10-01>
+:LOGBOOK:
+CLOCK: [2025-10-01 Wed 12:17]--[2025-10-01 Wed 12:27] =>  0:10
+:END:
+Done by adding the `Password(true)` flag to the input field.
+** DONE Write input to .env file <2025-10-01>
+** DONE Prompt for API key <2025-10-01>
+
+* Canceled
