@@ -2,3 +2,8 @@
 secrets/
 .DS_Store
 .icon
+.api
+*.tape
+*.gif
+*.org
+

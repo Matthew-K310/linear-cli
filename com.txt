@@ -1,0 +1,7 @@
+feat(api): Add auth and API calls
+
+    Auth calls are made via auth.go.
+    teams.go handles team selection, and then saves the team id.
+    projects.go does the same, but for projects.
+
+    All functions are in a testing state, so this is not usable as a complete package.
