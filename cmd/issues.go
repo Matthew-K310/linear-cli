@@ -18,26 +18,28 @@ type IssueResponse struct {
 		Team struct {
 			ID       string `json:"id"`
 			Projects struct {
-				ID     string `json:"id"`
-				Issues struct {
-					Nodes []struct {
-						ID          string `json:"id"`
-						Title       string `json:"title"`
-						Description string `json:"description"`
-						State       struct {
-							Name string `json:"name"`
-							Type string `json:"type"`
-						} `json:"state"`
-					} `json:"nodes"`
-				} `json:"issues"`
+				Nodes []struct {
+					ID     string `json:"id"`
+					Name   string `json:"name"`
+					Issues struct {
+						Nodes []struct {
+							ID          string `json:"id"`
+							Title       string `json:"title"`
+							Description string `json:"description"`
+							State       struct {
+								Name string `json:"name"`
+							} `json:"state"`
+						} `json:"nodes"`
+					} `json:"issues"`
+				} `json:"nodes"`
 			} `json:"projects"`
-		} `json:"teams"`
+		} `json:"team"`
 	} `json:"data"`
 }
 
 //	var projectSelectCmd = &cobra.Command{
-//		Use:   "project select",
-//		Short: "Select project and save PROJECT_ID to .env",
+//		Use:   "issue select",
+//		Short: "Select issue and save ISSUE_ID to .env",
 //		Run: func(cmd *cobra.Command, args []string) {
 func main() {
 	// Load from .env
@@ -64,27 +66,32 @@ func main() {
 	url := "https://api.linear.app/graphql"
 
 	issuesQuery := `
-	query ProjectIssues($projectid: String!) {
-		team(id: $id){
-			project(id: $projectid) {
-				issues {
-					nodes {
-						id
-						title
-						state {
-							name
-						}
-					}
-				}
-			}
-		}
-   }`
+query ProjectIssues($teamId: String!, $projectId: ID!) {
+  team(id: $teamId) {
+	projects(filter: { id: { eq: $projectId } }) {
+      nodes {
+        id
+        name
+        issues {
+          nodes {
+            id
+            title
+            description
+            state {
+              name
+            }
+          }
+        }
+      }
+    }
+  }
+}`
 
 	issueBody, err := json.Marshal(map[string]any{
 		"query": issuesQuery,
 		"variables": map[string]string{
-			"id":        loadedTeam,    // this comes from .env TEAM_ID
-			"projectid": loadedProject, // this comes from .env TEAM_ID
+			"teamId":    loadedTeam,
+			"projectId": loadedProject,
 		},
 	})
 	if err != nil {
@@ -106,7 +113,6 @@ func main() {
 	defer resp.Body.Close()
 
 	issueBody, _ = io.ReadAll(resp.Body)
-
 	fmt.Println("Raw response:", string(issueBody))
 
 	var result IssueResponse
@@ -115,18 +121,22 @@ func main() {
 		return
 	}
 
-	// Collect project names + IDs
+	// Collect all issues across all projects
 	var issueNames []string
 	var issueIDs []string
-	for _, issue := range result.Data.Team.Projects.Issues.Nodes {
-		issueNames = append(issueNames, issue.Title)
-		issueIDs = append(issueIDs, issue.ID)
+	for _, project := range result.Data.Team.Projects.Nodes {
+		if project.ID != loadedProject {
+			continue
+		}
+		for _, issue := range project.Issues.Nodes {
+			issueNames = append(issueNames, issue.Title)
+			issueIDs = append(issueIDs, issue.ID)
+		}
 	}
 
-	// Variable to hold the user’s selection (project name)
+	// Variable to hold the user’s selection
 	var selectedIssue string
 
-	// Build the select menu
 	if err := huh.NewSelect[string]().
 		Options(huh.NewOptions(issueNames...)...).
 		Value(&selectedIssue).
@@ -136,7 +146,7 @@ func main() {
 		return
 	}
 
-	// Find the ID that corresponds to the selected project
+	// Find the ID that corresponds to the selected issue
 	var selectedIssueID string
 	for i, name := range issueNames {
 		if name == selectedIssue {
@@ -145,17 +155,14 @@ func main() {
 		}
 	}
 
-	// Read existing .env into a map
+	// Read/modify .env
 	envMap, err := godotenv.Read(".env")
 	if err != nil {
-		// If the file doesn't exist yet, just start fresh
 		envMap = make(map[string]string)
 	}
 
-	// Update/insert PROJECT_ID
 	envMap["ISSUE_ID"] = selectedIssueID
 
-	// Rewrite the .env file with all keys
 	file, err := os.Create(".env")
 	if err != nil {
 		log.Fatalf("failed to create .env file: %v", err)
@@ -171,7 +178,6 @@ func main() {
 
 	fmt.Println("Saved ISSUE_ID to .env")
 
-	// Load from .env
 	if err := godotenv.Load(); err != nil {
 		log.Fatal("Error loading .env file")
 	}

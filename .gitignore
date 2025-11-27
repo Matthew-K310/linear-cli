@@ -1,10 +1,5 @@
-.env
-secrets/
-.DS_Store
-.icon
-.api
-*.tape
-*.gif
-*.org
-*.txt
+**/.env
 
+/.direnv
+.env
+.DS_Store
